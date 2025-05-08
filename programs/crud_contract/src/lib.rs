@@ -34,6 +34,20 @@ pub mod crud_interface {
         Ok(())
     }
 
+    pub fn read(ctx: Context<ReadText>, id: u64) -> Result<(Text)> {
+        let read_account = &mut ctx.accounts.read_account;
+
+        Ok(Text {
+            id: read_account.id,
+            owner: read_account.owner,
+            title: read_account.title.clone(),
+            content: read_account.content.clone(),
+            created_at: read_account.created_at,
+            updated_at: read_account.updated_at,
+            bump: read_account.bump,
+        })
+    }
+
     pub fn update(
         _ctx: Context<UpdateText>,
         _id: u64,
@@ -44,10 +58,6 @@ pub mod crud_interface {
         // instruction function, we inject it to our UpdateText context function, help us to form
         // the PDAs address
         let update_account = &mut _ctx.accounts.update_account;
-
-        if update_account.owner != _ctx.accounts.signer.key() {
-            return Err(ProgramError::InvalidAccountData.into());
-        }
 
         update_account.title = new_title;
         update_account.content = new_content;
@@ -142,17 +152,53 @@ pub struct CreateText<'info> {
         init,
         space = 8 + Text::INIT_SPACE,
         payer = signer,
-        seeds = [b"text", global_account.total_text_created.to_le_bytes().as_ref()], // global scope, not user scope
+        seeds = [b"text", global_account.total_text_created.to_le_bytes().as_ref()], 
         bump,
     )]
     pub create_account: Account<'info, Text>,
     pub system_program: Program<'info, System>,
 }
 
-// About read, I think we just need to create a view function
-// Anchor/Solana programs can't return values like typical functions (e.g.,
-// return user_account.score;)—instead, you read the data on the client after calling the instruction.
-// When we already have Text account, we will access with PDAs in client side
+// Anchor/Solana programs can't return values like typical functions because state lives in account, not program(Contract)
+/**
+ * Reading data mean we accessing account data via their address in a client or instruction
+ * We will need The accounts struct for the ReadText instruction and The instruction logic to read the Text account.
+ * What the instruction will do ? It will derive the text account PDAs from ReadText derive account struct using the seeds
+ * we access the Text account directly, validating its PDA to ensure it’s the correct account.
+ *
+ */
+/**
+ * What this derive struct will have ?
+ * read_account : the text account to read from, we validate it with PDAs seeds [b"text", id.to_le_bytes()]
+ * global_account : include it to validate account
+ * #[instruction(id: u64)]: Allows the instruction to access the id parameter to derive the PDA seeds.
+ * Since this is read-only, we don’t need mut, a signer or system program unless additional checks are required.
+ * global_account is included for optional validation. It allows you to check if
+ * the provided id is valid (e.g., id < global_account.total_text_created) to ensure the Text account exists.
+ * For example :
+ * if id >= ctx.accounts.global_account.total_text_created {
+    return Err(ErrorCode::InvalidId.into());
+    }
+ *
+ *
+ */
+#[derive(Accounts)]
+#[instruction(id: u64)]
+pub struct ReadText<'info> {
+    #[account(
+        mut,
+        seeds=[b"global"],
+        bump= global_account.bump
+    )]
+    pub global_account: Account<'info, GlobalState>, // optional, PDA for validation
+
+    // does not need to init, just access existing data
+    #[account(
+        seeds=[b"text", id.to_le_bytes().as_ref()],
+        bump=read_account.bump
+    )]
+    pub read_account: Account<'info, Text>, // PDA
+}
 
 // Update Section
 // When we let user update text, we update into already initialized "create_account" account
@@ -169,6 +215,11 @@ pub struct CreateText<'info> {
 pub struct UpdateText<'info> {
     #[account(mut)]
     pub signer: Signer<'info>, // who updated, who charge
+    #[account(
+        seeds=[b"global"],
+        bump = global_account.bump
+    )]
+    pub global_account: Account<'info, GlobalState>, // took this out for validate (id passed in > total_text_created), but turn out it does not neede
 
     // here, it reference to already existing account using exact same seeds we use into createText
     // We resolving it from the same seeds that we used to initialize within Create part
@@ -178,13 +229,11 @@ pub struct UpdateText<'info> {
     #[account(
         mut,
         seeds=[b"text", id.to_le_bytes().as_ref()], 
-        bump,
-        realloc = 8 + Text::INIT_SPACE,
-        realloc::payer = signer,
-        realloc::zero = true
+        bump = update_account.bump,
+        constraint = update_account.owner == signer.key() @ ErrorCode::Unauthorized,
     )]
     pub update_account: Account<'info, Text>,
-    pub system_program: Program<'info, System>,
+    // No System Program: No account creation, so it’s not required.
 }
 
 // Delete part
@@ -193,19 +242,22 @@ pub struct UpdateText<'info> {
 #[derive(Accounts)]
 #[instruction(id: u64)]
 pub struct DeleteText<'info> {
-    #[account(mut)]
-    pub global_account: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds=[b"global"],
+        bump = global_account.bump)]
+    pub global_account: Account<'info, GlobalState>, // using it to decrement the text created
     #[account(mut)]
     pub signer: Signer<'info>, // Who call delete, who charge
 
     #[account(
         mut,
         seeds=[b"text", id.to_le_bytes().as_ref()], 
-        bump,
+        bump = delete_account.bump,
+        constraint = delete_account.owner == signer.key() @ ErrorCode::Unauthorized,
         close = signer, // lamports returned to whoever called
     )]
     pub delete_account: Account<'info, Text>,
-    pub system_program: Program<'info, System>,
 }
 
 #[account]
@@ -228,4 +280,10 @@ pub struct Text {
     pub created_at: i64,
     pub updated_at: i64,
     pub bump: u8,
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("Unauthorized: Signer is not the owner")]
+    Unauthorized,
 }
