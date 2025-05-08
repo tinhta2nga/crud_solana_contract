@@ -6,24 +6,31 @@ declare_id!("coUnmi3oBUtwtd9fjeAvSsJssXh5A5xyPbhpewyzRVF");
 pub mod crud_interface {
     use super::*;
 
-    pub fn initialize(_ctx: Context<Initialize>) -> Result<()> {
-        let _initialize = &mut _ctx.accounts.global_account;
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        let _initialize = &mut ctx.accounts.global_account;
 
-        _initialize.admin = _ctx.accounts.signer.key();
+        _initialize.admin = ctx.accounts.signer.key();
         _initialize.total_text_created = 0;
         Ok(())
     }
 
-    pub fn create(_ctx: Context<CreateText>, title: String, content: String) -> Result<()> {
-        let create_account = &mut _ctx.accounts.create_account;
-        let global_account = &mut _ctx.accounts.global_account;
+    pub fn create_text(ctx: Context<CreateText>, title: String, content: String) -> Result<()> {
+        let global_account = &mut ctx.accounts.global_account;
+        let create_account = &mut ctx.accounts.create_account;
+        let clock = Clock::get()?;
 
-        create_account.owner = create_account.key();
+        // Initialize text account
+        create_account.id = global_account.total_text_created;
+        create_account.owner = ctx.accounts.signer.key(); // Correct owner
         create_account.title = title;
         create_account.content = content;
-        create_account.created_at = Clock::get()?.unix_timestamp;
-        create_account.updated_at = Clock::get()?.unix_timestamp;
+        create_account.created_at = clock.unix_timestamp;
+        create_account.updated_at = clock.unix_timestamp;
+        create_account.bump = ctx.bumps.create_account; // Matches create_account
+
+        // Increment total_text_created
         global_account.total_text_created += 1;
+
         Ok(())
     }
 
@@ -72,12 +79,11 @@ pub struct Initialize<'info> {
     // it tell Solana this signer account might be mutated during the instruction
     //The lamports balance can change. The data might change. The account might be closed or reassigned.
     pub signer: Signer<'info>, // who call, who charge
-
     #[account(
         init,
         payer = signer,
         space = 8 + GlobalState::INIT_SPACE,
-        seeds= [b"global"], // b"global" creates a byte slice (&[u8] of the string "global")
+        seeds= [b"global"],
         bump
     )]
     pub global_account: Account<'info, GlobalState>,
@@ -99,11 +105,39 @@ pub struct Initialize<'info> {
 // So, what does b"text" in here ?
 // It act as a domain prefix in PDA seeds, it like a table name in SQL
 #[derive(Accounts)]
+#[instruction(title: String, content: String)]
 pub struct CreateText<'info> {
-    #[account(mut)]
+    /**
+     * Purpose of re-declare global_account: provide total_text_created for the Text account's seeds
+     * Why we re-declare seeds and bump here when we already initialized it ?
+     * The reson is because security and validation
+     * The address of global_state is derived from b"global" and the programID + bump to ensure it off-curve
+     * When we include the global_state in an instruction (CreateText instruction). Anchor need to verify that
+     * the provided global_state account is the correct PDA, prevent SO passing a fake account that mimics GlobalState
+     * but has a different address
+     *
+     * Summary : Every instruction that use it must re-validate its PDA status
+     * In Solana, anyone can call your program’s instructions with any accounts they choose,
+     * unless you validate them. Without proper checks (like seeds and bump for PDAs),
+     * a malicious user could pass a fake account that mimics your GlobalState struct but has
+     * incorrect data (e.g., a wrong total_text_created). This could disrupt your program’s logic,
+     * like creating Text accounts with duplicate or incorrect PDAs.
+     * => Only the legitimate global_state PDA (created in Initialize) is accepted.
+     *
+     * Bonus : Real Usage of #[account(...)] Macro
+     * With init (Creates a PDA or Account):
+     * Without init (Checks an Existing Account):Purpose: Validates that an existing account
+     * matches the expected properties (e.g., is a PDA, has correct data).PDA Validation: If seeds and bump are provided,
+     *  it verifies the account is the correct PDA by matching its address to the derived PDA.
+     */
+    #[account(
+        mut,
+        seeds = [b"global"],
+        bump = global_account.bump
+    )]
     pub global_account: Account<'info, GlobalState>,
     #[account(mut)]
-    pub signer: Signer<'info>, // who create, who charge
+    pub signer: Signer<'info>,
     #[account(
         init,
         space = 8 + Text::INIT_SPACE,
@@ -179,6 +213,7 @@ pub struct DeleteText<'info> {
 pub struct GlobalState {
     pub admin: Pubkey,
     pub total_text_created: u64,
+    pub bump: u8,
 }
 
 #[account]
@@ -192,4 +227,5 @@ pub struct Text {
     pub content: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub bump: u8,
 }
