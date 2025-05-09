@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 declare_id!("coUnmi3oBUtwtd9fjeAvSsJssXh5A5xyPbhpewyzRVF");
 
 #[program]
-pub mod crud_interface {
+pub mod crud_contract {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -11,6 +11,7 @@ pub mod crud_interface {
 
         _initialize.admin = ctx.accounts.signer.key();
         _initialize.total_text_created = 0;
+        _initialize.bump = ctx.bumps.global_account;
         Ok(())
     }
 
@@ -94,7 +95,7 @@ pub struct Initialize<'info> {
         payer = signer,
         space = 8 + GlobalState::INIT_SPACE,
         seeds= [b"global"],
-        bump
+        bump 
     )]
     pub global_account: Account<'info, GlobalState>,
     pub system_program: Program<'info, System>,
@@ -143,7 +144,7 @@ pub struct CreateText<'info> {
     #[account(
         mut,
         seeds = [b"global"],
-        bump = global_account.bump
+        bump = global_account.bump // check using seeds + bump
     )]
     pub global_account: Account<'info, GlobalState>,
     #[account(mut)]

@@ -2,7 +2,7 @@
 seeds = false
 skip-lint = false
 [programs.localnet]
-crud_contract = "F8M46BcT948ZgRdYMGGvzTHk96FyMnb4QAk74fCc7Z57"
+crud_contract = "coUnmi3oBUtwtd9fjeAvSsJssXh5A5xyPbhpewyzRVF"
 
 [registry]
 url = "https://api.apr.dev"
