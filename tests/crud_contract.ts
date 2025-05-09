@@ -53,7 +53,7 @@ describe("crud_contract", () => {
     );
   });
 
-  it.only("Create Text account", async () => {
+  it("Create Text account", async () => {
     // Make sure another user calling create text
 
     // Fetch initial global account to get initial state variables value
@@ -148,6 +148,94 @@ describe("crud_contract", () => {
       create_account.updatedAt.toNumber(),
       create_account.createdAt.toNumber(),
       "Updated at should match created at initially"
+    );
+  });
+
+  // update sections
+  it.only("Update text account", async () => {
+    // We need create a text first before update into it
+    const initialGlobalAccount = await program.account.globalState.fetch(
+      global_accountPDA
+    );
+    const initialTextCreated = initialGlobalAccount.totalTextCreated.toNumber();
+    console.log("initialTextCreated", initialTextCreated);
+
+    // derive create account out first
+    const title = "Transformer";
+    const content = "Robot battle movies";
+    const [create_accountPDA] =
+      await anchor.web3.PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("text"),
+          Buffer.from(
+            new anchor.BN(initialTextCreated).toArrayLike(Buffer, "le", 8)
+          ),
+        ],
+        program.programId
+      );
+
+    // then create
+    await program.methods
+      .createText(title, content)
+      .accounts({
+        globalAccount: global_accountPDA,
+        signer: provider.wallet.publicKey,
+        createAccount: create_accountPDA,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const globalAccount = await program.account.globalState.fetch(
+      global_accountPDA
+    );
+    const totalCreated = globalAccount.totalTextCreated;
+    console.log("totalCreated", totalCreated);
+
+    // after create, update new title
+    const afterGlobalAccount = await program.account.globalState.fetch(
+      global_accountPDA
+    );
+    const afterTextCreated = afterGlobalAccount.totalTextCreated;
+
+    // derive update account, basically,  update account here is just updated data inside created acount
+    // and that create_account already exist, we just need to point to them
+    // using seeds and bump point to correct create account in previous create text part
+    // we just naming them separately to easy understanding
+
+    // call update instruction
+    const updateTitle = "Scar face";
+    const updateContent = "Tony motana";
+
+    await program.methods
+      .update(new anchor.BN(0), updateTitle, updateContent)
+      .accounts({
+        updateAccount: create_accountPDA,
+        signer: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    const updatedTextAccount = await program.account.text.fetch(
+      create_accountPDA
+    );
+    assert.strictEqual(
+      updatedTextAccount.id.toNumber(),
+      0,
+      "ID should remain unchanged"
+    );
+    assert.strictEqual(
+      updatedTextAccount.owner.toBase58(),
+      provider.wallet.publicKey.toBase58(),
+      "Owner should remain unchanged"
+    );
+    assert.strictEqual(
+      updatedTextAccount.title,
+      updateTitle,
+      "Title should be updated"
+    );
+    assert.strictEqual(
+      updatedTextAccount.content,
+      updateContent,
+      "Content should be updated"
     );
   });
 });

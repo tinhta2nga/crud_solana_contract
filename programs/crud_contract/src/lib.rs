@@ -216,11 +216,11 @@ pub struct ReadText<'info> {
 pub struct UpdateText<'info> {
     #[account(mut)]
     pub signer: Signer<'info>, // who updated, who charge
-    #[account(
-        seeds=[b"global"],
-        bump = global_account.bump
-    )]
-    pub global_account: Account<'info, GlobalState>, // took this out for validate (id passed in > total_text_created), but turn out it does not neede
+    // #[account(
+    //     seeds=[b"global"],
+    //     bump = global_account.bump
+    // )]
+    // pub global_account: Account<'info, GlobalState>, // took this out for validate (id passed in > total_text_created), but turn out it does not neede
 
     // here, it reference to already existing account using exact same seeds we use into createText
     // We resolving it from the same seeds that we used to initialize within Create part
